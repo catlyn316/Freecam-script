@@ -1,0 +1,356 @@
+-- Roblox 平板 Freecam 腳本
+-- 適用於觸控螢幕設備
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ContextActionService = game:GetService("ContextActionService")
+
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
+local character = player.Character or player.CharacterAdded:Wait()
+
+-- Freecam 狀態
+local freecamEnabled = false
+local cameraCFrame = camera.CFrame
+local moveSpeed = 1.2
+local verticalSpeed = 0.5
+local rotationSpeed = 0.015
+
+-- 觸控控制變量
+local touchControls = {}
+local moveTouch = nil
+local lookTouch = nil
+local speedTouch = nil
+
+-- 創建觸控控制 GUI
+local function createTouchGUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "FreecamTouchControls"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = player.PlayerGui
+    
+    -- 左側移動搖桿區域（更大範圍）
+    local moveFrame = Instance.new("Frame")
+    moveFrame.Name = "MoveFrame"
+    moveFrame.Size = UDim2.new(0, 300, 0, 300)
+    moveFrame.Position = UDim2.new(0, 10, 1, -310)
+    moveFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    moveFrame.BackgroundTransparency = 0.8
+    moveFrame.BorderSizePixel = 0
+    moveFrame.Parent = screenGui
+    
+    local moveCorner = Instance.new("UICorner")
+    moveCorner.CornerRadius = UDim.new(0, 150)
+    moveCorner.Parent = moveFrame
+    
+    local moveLabel = Instance.new("TextLabel")
+    moveLabel.Size = UDim2.new(1, 0, 1, 0)
+    moveLabel.BackgroundTransparency = 1
+    moveLabel.Text = "移動"
+    moveLabel.TextColor3 = Color3.new(1, 1, 1)
+    moveLabel.TextSize = 28
+    moveLabel.Font = Enum.Font.GothamBold
+    moveLabel.Parent = moveFrame
+    
+    -- 右側視角搖桿區域（更大範圍）
+    local lookFrame = Instance.new("Frame")
+    lookFrame.Name = "LookFrame"
+    lookFrame.Size = UDim2.new(0, 300, 0, 300)
+    lookFrame.Position = UDim2.new(1, -310, 1, -310)
+    lookFrame.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    lookFrame.BackgroundTransparency = 0.8
+    lookFrame.BorderSizePixel = 0
+    lookFrame.Parent = screenGui
+    
+    local lookCorner = Instance.new("UICorner")
+    lookCorner.CornerRadius = UDim.new(0, 150)
+    lookCorner.Parent = lookFrame
+    
+    local lookLabel = Instance.new("TextLabel")
+    lookLabel.Size = UDim2.new(1, 0, 1, 0)
+    lookLabel.BackgroundTransparency = 1
+    lookLabel.Text = "視角"
+    lookLabel.TextColor3 = Color3.new(1, 1, 1)
+    lookLabel.TextSize = 28
+    lookLabel.Font = Enum.Font.GothamBold
+    lookLabel.Parent = lookFrame
+    
+    -- 速度控制按鈕（上下調整高度）
+    local speedUpBtn = Instance.new("TextButton")
+    speedUpBtn.Name = "SpeedUpBtn"
+    speedUpBtn.Size = UDim2.new(0, 80, 0, 80)
+    speedUpBtn.Position = UDim2.new(0.5, -40, 0, 20)
+    speedUpBtn.BackgroundColor3 = Color3.fromRGB(70, 130, 70)
+    speedUpBtn.BackgroundTransparency = 0.3
+    speedUpBtn.Text = "↑"
+    speedUpBtn.TextColor3 = Color3.new(1, 1, 1)
+    speedUpBtn.TextSize = 36
+    speedUpBtn.Font = Enum.Font.GothamBold
+    speedUpBtn.Parent = screenGui
+    
+    local upCorner = Instance.new("UICorner")
+    upCorner.CornerRadius = UDim.new(0, 40)
+    upCorner.Parent = speedUpBtn
+    
+    local speedDownBtn = Instance.new("TextButton")
+    speedDownBtn.Name = "SpeedDownBtn"
+    speedDownBtn.Size = UDim2.new(0, 80, 0, 80)
+    speedDownBtn.Position = UDim2.new(0.5, -40, 0, 110)
+    speedDownBtn.BackgroundColor3 = Color3.fromRGB(180, 70, 70)
+    speedDownBtn.BackgroundTransparency = 0.3
+    speedDownBtn.Text = "↓"
+    speedDownBtn.TextColor3 = Color3.new(1, 1, 1)
+    speedDownBtn.TextSize = 36
+    speedDownBtn.Font = Enum.Font.GothamBold
+    speedDownBtn.Parent = screenGui
+    
+    local downCorner = Instance.new("UICorner")
+    downCorner.CornerRadius = UDim.new(0, 40)
+    downCorner.Parent = speedDownBtn
+    
+    -- 切換按鈕
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleBtn"
+    toggleBtn.Size = UDim2.new(0, 120, 0, 50)
+    toggleBtn.Position = UDim2.new(0.5, -70, 1, -70)
+    toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+    toggleBtn.BackgroundTransparency = 0.3
+    toggleBtn.Text = "開啟 Freecam"
+    toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+    toggleBtn.TextSize = 18
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.Active = true
+    toggleBtn.Draggable = true
+    toggleBtn.Parent = screenGui
+    
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(0, 10)
+    toggleCorner.Parent = toggleBtn
+    
+    -- 關閉按鈕
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Name = "CloseBtn"
+    closeBtn.Size = UDim2.new(0, 50, 0, 50)
+    closeBtn.Position = UDim2.new(0, 130, 0, 0)
+    closeBtn.AnchorPoint = Vector2.new(0, 0)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 70, 70)
+    closeBtn.BackgroundTransparency = 0.3
+    closeBtn.Text = "X"
+    closeBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeBtn.TextSize = 24
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.Parent = toggleBtn
+    
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0, 10)
+    closeCorner.Parent = closeBtn
+    
+    return screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn
+end
+
+-- 保存角色原始位置
+local savedCharacterCFrame = nil
+local rootPart = nil
+
+-- 啟用 Freecam
+local function enableFreecam()
+    freecamEnabled = true
+    camera.CameraType = Enum.CameraType.Scriptable
+    cameraCFrame = camera.CFrame
+    
+    if character then
+        rootPart = character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            savedCharacterCFrame = rootPart.CFrame
+            rootPart.Anchored = true
+        end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.AutoRotate = false
+            humanoid.WalkSpeed = 0
+            humanoid.JumpPower = 0
+            humanoid.JumpHeight = 0
+        end
+    end
+end
+
+-- 禁用 Freecam
+local function disableFreecam()
+    freecamEnabled = false
+    camera.CameraType = Enum.CameraType.Custom
+    
+    if character then
+        if rootPart then
+            rootPart.Anchored = false
+        end
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.AutoRotate = true
+            humanoid.WalkSpeed = 16
+            humanoid.JumpPower = 50
+            humanoid.JumpHeight = 7.2
+        end
+        camera.CameraSubject = character:FindFirstChildOfClass("Humanoid")
+    end
+    
+    rootPart = nil
+    savedCharacterCFrame = nil
+end
+
+-- 初始化
+local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn = createTouchGUI()
+
+-- 獲取觸控位置相對於框架中心的偏移
+local function getTouchOffset(touch, frame)
+    local frameCenter = frame.AbsolutePosition + frame.AbsoluteSize / 2
+    local touchPos = Vector2.new(touch.Position.X, touch.Position.Y)
+    local offset = touchPos - frameCenter
+    local maxDist = frame.AbsoluteSize.X / 2
+    return offset / maxDist
+end
+
+-- 處理觸控輸入
+UserInputService.TouchStarted:Connect(function(touch, gameProcessed)
+    if gameProcessed then return end
+    if not freecamEnabled then return end
+    
+    local touchPos = Vector2.new(touch.Position.X, touch.Position.Y)
+    
+    -- 檢查是否在移動區域
+    local moveMin = moveFrame.AbsolutePosition
+    local moveMax = moveMin + moveFrame.AbsoluteSize
+    if touchPos.X >= moveMin.X and touchPos.X <= moveMax.X and
+       touchPos.Y >= moveMin.Y and touchPos.Y <= moveMax.Y then
+        moveTouch = touch
+    end
+    
+    -- 檢查是否在視角區域
+    local lookMin = lookFrame.AbsolutePosition
+    local lookMax = lookMin + lookFrame.AbsoluteSize
+    if touchPos.X >= lookMin.X and touchPos.X <= lookMax.X and
+       touchPos.Y >= lookMin.Y and touchPos.Y <= lookMax.Y then
+        lookTouch = touch
+    end
+end)
+
+UserInputService.TouchEnded:Connect(function(touch, gameProcessed)
+    if moveTouch and touch == moveTouch then
+        moveTouch = nil
+    end
+    if lookTouch and touch == lookTouch then
+        lookTouch = nil
+    end
+end)
+
+-- 高度控制按鈕
+speedUpBtn.MouseButton1Down:Connect(function()
+    speedTouch = "up"
+end)
+
+speedUpBtn.MouseButton1Up:Connect(function()
+    if speedTouch == "up" then speedTouch = nil end
+end)
+
+speedDownBtn.MouseButton1Down:Connect(function()
+    speedTouch = "down"
+end)
+
+speedDownBtn.MouseButton1Up:Connect(function()
+    if speedTouch == "down" then speedTouch = nil end
+end)
+
+-- 切換按鈕
+toggleBtn.MouseButton1Click:Connect(function()
+    if freecamEnabled then
+        disableFreecam()
+        toggleBtn.Text = "開啟 Freecam"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+        moveFrame.Visible = false
+        lookFrame.Visible = false
+        speedUpBtn.Visible = false
+        speedDownBtn.Visible = false
+    else
+        enableFreecam()
+        toggleBtn.Text = "關閉 Freecam"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+        moveFrame.Visible = true
+        lookFrame.Visible = true
+        speedUpBtn.Visible = true
+        speedDownBtn.Visible = true
+    end
+end)
+
+-- 關閉按鈕（移除整個 GUI）
+closeBtn.MouseButton1Click:Connect(function()
+    if freecamEnabled then
+        disableFreecam()
+    end
+    screenGui:Destroy()
+    print("Freecam 腳本已關閉")
+end)
+
+-- 初始隱藏控制元件
+moveFrame.Visible = false
+lookFrame.Visible = false
+speedUpBtn.Visible = false
+speedDownBtn.Visible = false
+
+-- 更新相機
+RunService.RenderStepped:Connect(function(deltaTime)
+    if not freecamEnabled then return end
+    
+    -- 確保角色保持靜止
+    if rootPart and savedCharacterCFrame then
+        rootPart.CFrame = savedCharacterCFrame
+        rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+    end
+    
+    local moveVector = Vector3.new(0, 0, 0)
+    
+    -- 處理移動觸控
+    if moveTouch then
+        local offset = getTouchOffset(moveTouch, moveFrame)
+        moveVector = Vector3.new(offset.X, 0, -offset.Y)
+    end
+    
+    -- 處理視角觸控
+    if lookTouch then
+        local offset = getTouchOffset(lookTouch, lookFrame)
+        local rotX = -offset.Y * rotationSpeed * 100 * deltaTime
+        local rotY = -offset.X * rotationSpeed * 100 * deltaTime
+        
+        local lookVector = cameraCFrame.LookVector
+        local rightVector = cameraCFrame.RightVector
+        
+        cameraCFrame = cameraCFrame * CFrame.Angles(rotX, 0, 0)
+        cameraCFrame = CFrame.new(cameraCFrame.Position) * CFrame.Angles(0, rotY, 0) * CFrame.new(0, 0, 0) * (cameraCFrame - cameraCFrame.Position)
+    end
+    
+    -- 處理高度控制
+    if speedTouch == "up" then
+        moveVector = moveVector + Vector3.new(0, verticalSpeed / moveSpeed, 0)
+    elseif speedTouch == "down" then
+        moveVector = moveVector + Vector3.new(0, -verticalSpeed / moveSpeed, 0)
+    end
+    
+    -- 應用移動
+    if moveVector.Magnitude > 0 then
+        local cameraMoveVector = (cameraCFrame.RightVector * moveVector.X + 
+                                  Vector3.new(0, moveVector.Y, 0) + 
+                                  cameraCFrame.LookVector * moveVector.Z)
+        cameraCFrame = cameraCFrame + (cameraMoveVector * moveSpeed)
+    end
+    
+    camera.CFrame = cameraCFrame
+end)
+
+print("平板 Freecam 腳本已載入!")
+print("點擊底部的按鈕來開啟/關閉 Freecam")
+print("左側搖桿: 前後左右移動")
+print("右側搖桿: 旋轉視角")
+print("頂部按鈕: 上升/下降")
