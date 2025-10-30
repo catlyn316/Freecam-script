@@ -217,10 +217,54 @@ local function disableFreecam()
     
     rootPart = nil
     savedCharacterCFrame = nil
+    
+    -- 更新按鈕狀態
+    if toggleBtn then
+        toggleBtn.Text = "開啟 Freecam"
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+        moveFrame.Visible = false
+        lookFrame.Visible = false
+        speedUpBtn.Visible = false
+        speedDownBtn.Visible = false
+    end
 end
 
 -- 初始化
 local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn, clickTpBtn = createTouchGUI()
+
+-- 監聽角色死亡
+local function onCharacterAdded(newCharacter)
+    character = newCharacter
+    
+    local humanoid = character:WaitForChild("Humanoid")
+    humanoid.Died:Connect(function()
+        if freecamEnabled then
+            freecamEnabled = false
+            camera.CameraType = Enum.CameraType.Custom
+            
+            -- 更新按鈕和UI狀態
+            toggleBtn.Text = "開啟 Freecam"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+            moveFrame.Visible = false
+            lookFrame.Visible = false
+            speedUpBtn.Visible = false
+            speedDownBtn.Visible = false
+            
+            rootPart = nil
+            savedCharacterCFrame = nil
+            
+            print("角色死亡，Freecam 已自動關閉")
+        end
+    end)
+end
+
+-- 初始角色
+if character then
+    onCharacterAdded(character)
+end
+
+-- 監聽角色重生
+player.CharacterAdded:Connect(onCharacterAdded)
 
 -- 追蹤拖拽狀態
 local isDragging = false
