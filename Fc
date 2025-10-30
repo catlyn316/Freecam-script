@@ -12,6 +12,7 @@ local character = player.Character or player.CharacterAdded:Wait()
 
 -- Freecam 狀態
 local freecamEnabled = false
+local clickTpEnabled = false
 local cameraCFrame = camera.CFrame
 local moveSpeed = 1.2
 local verticalSpeed = 0.5
@@ -114,7 +115,7 @@ local function createTouchGUI()
     local toggleBtn = Instance.new("TextButton")
     toggleBtn.Name = "ToggleBtn"
     toggleBtn.Size = UDim2.new(0, 120, 0, 50)
-    toggleBtn.Position = UDim2.new(0.5, -70, 1, -70)
+    toggleBtn.Position = UDim2.new(0.5, -70, 1, -200)
     toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
     toggleBtn.BackgroundTransparency = 0.3
     toggleBtn.Text = "開啟 Freecam"
@@ -147,7 +148,24 @@ local function createTouchGUI()
     closeCorner.CornerRadius = UDim.new(0, 10)
     closeCorner.Parent = closeBtn
     
-    return screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn
+    -- ClickTP 按鈕
+    local clickTpBtn = Instance.new("TextButton")
+    clickTpBtn.Name = "ClickTpBtn"
+    clickTpBtn.Size = UDim2.new(0, 120, 0, 50)
+    clickTpBtn.Position = UDim2.new(0, 0, 0, 60)
+    clickTpBtn.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+    clickTpBtn.BackgroundTransparency = 0.3
+    clickTpBtn.Text = "ClickTP: 關"
+    clickTpBtn.TextColor3 = Color3.new(1, 1, 1)
+    clickTpBtn.TextSize = 18
+    clickTpBtn.Font = Enum.Font.GothamBold
+    clickTpBtn.Parent = toggleBtn
+    
+    local clickTpCorner = Instance.new("UICorner")
+    clickTpCorner.CornerRadius = UDim.new(0, 10)
+    clickTpCorner.Parent = clickTpBtn
+    
+    return screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn, clickTpBtn
 end
 
 -- 保存角色原始位置
@@ -202,7 +220,27 @@ local function disableFreecam()
 end
 
 -- 初始化
-local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn = createTouchGUI()
+local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn, clickTpBtn = createTouchGUI()
+
+-- 追蹤拖拽狀態
+local isDragging = false
+local dragStartPos = nil
+
+toggleBtn.MouseButton1Down:Connect(function()
+    dragStartPos = toggleBtn.Position
+    isDragging = false
+end)
+
+toggleBtn:GetPropertyChangedSignal("Position"):Connect(function()
+    if dragStartPos then
+        isDragging = true
+    end
+end)
+
+-- 防止 ClickTP 按鈕觸發拖拽
+clickTpBtn.MouseButton1Down:Connect(function()
+    -- 阻止事件冒泡到父按鈕
+end)
 
 -- 獲取觸控位置相對於框架中心的偏移
 local function getTouchOffset(touch, frame)
@@ -265,23 +303,29 @@ end)
 
 -- 切換按鈕
 toggleBtn.MouseButton1Click:Connect(function()
-    if freecamEnabled then
-        disableFreecam()
-        toggleBtn.Text = "開啟 Freecam"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
-        moveFrame.Visible = false
-        lookFrame.Visible = false
-        speedUpBtn.Visible = false
-        speedDownBtn.Visible = false
-    else
-        enableFreecam()
-        toggleBtn.Text = "關閉 Freecam"
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
-        moveFrame.Visible = true
-        lookFrame.Visible = true
-        speedUpBtn.Visible = true
-        speedDownBtn.Visible = true
+    -- 只有在沒有拖拽時才觸發切換
+    if not isDragging then
+        if freecamEnabled then
+            disableFreecam()
+            toggleBtn.Text = "開啟 Freecam"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+            moveFrame.Visible = false
+            lookFrame.Visible = false
+            speedUpBtn.Visible = false
+            speedDownBtn.Visible = false
+        else
+            enableFreecam()
+            toggleBtn.Text = "關閉 Freecam"
+            toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+            moveFrame.Visible = true
+            lookFrame.Visible = true
+            speedUpBtn.Visible = true
+            speedDownBtn.Visible = true
+        end
     end
+    -- 重置拖拽狀態
+    isDragging = false
+    dragStartPos = nil
 end)
 
 -- 關閉按鈕（移除整個 GUI）
@@ -291,6 +335,92 @@ closeBtn.MouseButton1Click:Connect(function()
     end
     screenGui:Destroy()
     print("Freecam 腳本已關閉")
+end)
+
+-- ClickTP 按鈕
+clickTpBtn.MouseButton1Click:Connect(function()
+    clickTpEnabled = not clickTpEnabled
+    if clickTpEnabled then
+        clickTpBtn.Text = "ClickTP: 開"
+        clickTpBtn.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+        print("ClickTP 已開啟")
+    else
+        clickTpBtn.Text = "ClickTP: 關"
+        clickTpBtn.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+        print("ClickTP 已關閉")
+    end
+end)
+
+-- ClickTP 功能
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not clickTpEnabled then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and 
+       input.UserInputType ~= Enum.UserInputType.Touch then return end
+    
+    local touchPos = Vector2.new(input.Position.X, input.Position.Y)
+    
+    -- 檢查是否點擊在切換按鈕區域（包含 ClickTP 和關閉按鈕）
+    local toggleMin = toggleBtn.AbsolutePosition
+    local toggleMax = toggleMin + toggleBtn.AbsoluteSize + Vector2.new(closeBtn.AbsoluteSize.X, clickTpBtn.AbsoluteSize.Y)
+    if touchPos.X >= toggleMin.X and touchPos.X <= toggleMax.X and
+       touchPos.Y >= toggleMin.Y and touchPos.Y <= toggleMax.Y then
+        return
+    end
+    
+    -- 如果在 Freecam 模式下，檢查是否點擊在控制區域
+    if freecamEnabled then
+        -- 檢查是否在移動區域
+        local moveMin = moveFrame.AbsolutePosition
+        local moveMax = moveMin + moveFrame.AbsoluteSize
+        if touchPos.X >= moveMin.X and touchPos.X <= moveMax.X and
+           touchPos.Y >= moveMin.Y and touchPos.Y <= moveMax.Y then
+            return
+        end
+        
+        -- 檢查是否在視角區域
+        local lookMin = lookFrame.AbsolutePosition
+        local lookMax = lookMin + lookFrame.AbsoluteSize
+        if touchPos.X >= lookMin.X and touchPos.X <= lookMax.X and
+           touchPos.Y >= lookMin.Y and touchPos.Y <= lookMax.Y then
+            return
+        end
+        
+        -- 檢查是否在上下按鈕區域
+        local upMin = speedUpBtn.AbsolutePosition
+        local upMax = upMin + speedUpBtn.AbsoluteSize
+        if touchPos.X >= upMin.X and touchPos.X <= upMax.X and
+           touchPos.Y >= upMin.Y and touchPos.Y <= upMax.Y then
+            return
+        end
+        
+        local downMin = speedDownBtn.AbsolutePosition
+        local downMax = downMin + speedDownBtn.AbsoluteSize
+        if touchPos.X >= downMin.X and touchPos.X <= downMax.X and
+           touchPos.Y >= downMin.Y and touchPos.Y <= downMax.Y then
+            return
+        end
+    end
+    
+    -- 執行瞬移
+    local mouseLocation = UserInputService:GetMouseLocation()
+    local unitRay = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = {character}
+    
+    local raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
+    
+    if raycastResult and character then
+        local targetCFrame = character:FindFirstChild("HumanoidRootPart")
+        if targetCFrame then
+            targetCFrame.CFrame = CFrame.new(raycastResult.Position + Vector3.new(0, 3, 0))
+            
+            -- 如果在 Freecam 模式下，更新保存的位置
+            if freecamEnabled and rootPart then
+                savedCharacterCFrame = targetCFrame.CFrame
+            end
+        end
+    end
 end)
 
 -- 初始隱藏控制元件
