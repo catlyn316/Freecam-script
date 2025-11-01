@@ -165,7 +165,26 @@ local function createTouchGUI()
     clickTpCorner.CornerRadius = UDim.new(0, 10)
     clickTpCorner.Parent = clickTpBtn
     
-    return screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn, clickTpBtn
+    -- 提示標籤
+    local hintLabel = Instance.new("TextLabel")
+    hintLabel.Name = "HintLabel"
+    hintLabel.Size = UDim2.new(0, 250, 0, 40)
+    hintLabel.Position = UDim2.new(0, -65, 0, 120)
+    hintLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    hintLabel.BackgroundTransparency = 0.2
+    hintLabel.Text = "💡 Freecam下ClickTP需連按2次"
+    hintLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+    hintLabel.TextSize = 14
+    hintLabel.Font = Enum.Font.GothamBold
+    hintLabel.TextWrapped = true
+    hintLabel.Visible = false
+    hintLabel.Parent = toggleBtn
+    
+    local hintCorner = Instance.new("UICorner")
+    hintCorner.CornerRadius = UDim.new(0, 8)
+    hintCorner.Parent = hintLabel
+    
+    return screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn, clickTpBtn, hintLabel
 end
 
 -- 保存角色原始位置
@@ -230,7 +249,7 @@ local function disableFreecam()
 end
 
 -- 初始化
-local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn, clickTpBtn = createTouchGUI()
+local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, closeBtn, clickTpBtn, hintLabel = createTouchGUI()
 
 -- 監聽角色死亡
 local function onCharacterAdded(newCharacter)
@@ -357,6 +376,9 @@ toggleBtn.MouseButton1Click:Connect(function()
             lookFrame.Visible = false
             speedUpBtn.Visible = false
             speedDownBtn.Visible = false
+            if hintLabel then
+                hintLabel.Visible = false
+            end
         else
             enableFreecam()
             toggleBtn.Text = "關閉 Freecam"
@@ -365,6 +387,11 @@ toggleBtn.MouseButton1Click:Connect(function()
             lookFrame.Visible = true
             speedUpBtn.Visible = true
             speedDownBtn.Visible = true
+            -- 如果 ClickTP 開啟，顯示提示
+            if clickTpEnabled and hintLabel then
+                hintLabel.Visible = true
+                print("Freecam開啟 - 提示標籤已顯示")
+            end
         end
     end
     -- 重置拖拽狀態
@@ -388,10 +415,25 @@ clickTpBtn.MouseButton1Click:Connect(function()
         clickTpBtn.Text = "ClickTP: 開"
         clickTpBtn.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
         print("ClickTP 已開啟")
+        -- 如果在 Freecam 模式下，顯示提示
+        if freecamEnabled and hintLabel then
+            hintLabel.Visible = true
+            print("提示標籤已顯示")
+            -- 5秒後自動隱藏提示
+            task.delay(5, function()
+                if hintLabel and hintLabel.Parent then
+                    hintLabel.Visible = false
+                    print("提示標籤已隱藏")
+                end
+            end)
+        end
     else
         clickTpBtn.Text = "ClickTP: 關"
         clickTpBtn.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
         print("ClickTP 已關閉")
+        if hintLabel then
+            hintLabel.Visible = false
+        end
     end
 end)
 
@@ -455,13 +497,22 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     local raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
     
     if raycastResult and character then
-        local targetCFrame = character:FindFirstChild("HumanoidRootPart")
-        if targetCFrame then
-            targetCFrame.CFrame = CFrame.new(raycastResult.Position + Vector3.new(0, 3, 0))
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local targetPos = raycastResult.Position + Vector3.new(0, 3, 0)
             
-            -- 如果在 Freecam 模式下，更新保存的位置
-            if freecamEnabled and rootPart then
-                savedCharacterCFrame = targetCFrame.CFrame
+            -- 如果在 Freecam 模式下，需要先解除固定再瞬移
+            if freecamEnabled then
+                hrp.Anchored = false
+                hrp.CFrame = CFrame.new(targetPos)
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                task.wait(0.1)
+                hrp.Anchored = true
+                savedCharacterCFrame = CFrame.new(targetPos)
+                rootPart = hrp
+            else
+                hrp.CFrame = CFrame.new(targetPos)
             end
         end
     end
