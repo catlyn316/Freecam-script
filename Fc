@@ -34,7 +34,22 @@ local function createTouchGUI()
     screenGui.Name = "FreecamTouchControls"
     screenGui.ResetOnSpawn = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.Parent = player.PlayerGui
+    
+    -- 【關鍵修改】設定極高的層級並掛載到 CoreGui
+    screenGui.DisplayOrder = 10000 
+    screenGui.IgnoreGuiInset = true 
+    
+    -- 嘗試掛載到 CoreGui (執行器專屬權限)
+    local success, err = pcall(function()
+        screenGui.Parent = game:GetService("CoreGui")
+    end)
+    -- 如果失敗，退回到 PlayerGui (備用)
+    if not success then
+        screenGui.Parent = player.PlayerGui
+    end
+    
+    -- ... (後續 UI 創建代碼不變)
+
     
     -- 左側移動搖桿區域（更大範圍）
     local moveFrame = Instance.new("Frame")
