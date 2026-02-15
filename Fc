@@ -16,11 +16,18 @@ local clickTpEnabled = false
 local isMinimized = false
 local cameraCFrame = camera.CFrame
 local moveSpeed = 1.2
-local baseSpeed = 1.2  -- 基礎移動速度
-local baseVerticalSpeed = 0.5  -- 基礎垂直速度
-local speedMultiplier = 1  -- 速度倍數
+local baseSpeed = 1.2
+local baseVerticalSpeed = 0.5
+local speedMultiplier = 1
 local verticalSpeed = 0.5
 local rotationSpeed = 0.015
+
+-- 傳送點系統
+local waypointList = {}       -- { name=string, position=Vector3, cframe=CFrame }
+local waypointCounter = 0
+local isPanelOpen = false
+local isThroughMode = true    -- 穿透模式預設開啟
+local selectedWaypointIndex = nil  -- 當前選中的傳送點索引
 
 -- 觸控控制變量
 local touchControls = {}
@@ -28,30 +35,23 @@ local moveTouch = nil
 local lookTouch = nil
 local speedTouch = nil
 
--- 創建觸控控制 GUI
+-- ========== GUI 建立 ==========
 local function createTouchGUI()
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "FreecamTouchControls"
     screenGui.ResetOnSpawn = false
     screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    
-    -- 【關鍵修改】設定極高的層級並掛載到 CoreGui
-    screenGui.DisplayOrder = 10000 
-    screenGui.IgnoreGuiInset = true 
-    
-    -- 嘗試掛載到 CoreGui (執行器專屬權限)
+    screenGui.DisplayOrder = 10000
+    screenGui.IgnoreGuiInset = true
+
     local success, err = pcall(function()
         screenGui.Parent = game:GetService("CoreGui")
     end)
-    -- 如果失敗，退回到 PlayerGui (備用)
     if not success then
         screenGui.Parent = player.PlayerGui
     end
-    
-    -- ... (後續 UI 創建代碼不變)
 
-    
-    -- 左側移動搖桿區域（更大範圍）
+    -- ===== 左側移動搖桿 =====
     local moveFrame = Instance.new("Frame")
     moveFrame.Name = "MoveFrame"
     moveFrame.Size = UDim2.new(0, 300, 0, 300)
@@ -60,11 +60,11 @@ local function createTouchGUI()
     moveFrame.BackgroundTransparency = 0.8
     moveFrame.BorderSizePixel = 0
     moveFrame.Parent = screenGui
-    
+
     local moveCorner = Instance.new("UICorner")
     moveCorner.CornerRadius = UDim.new(0, 150)
     moveCorner.Parent = moveFrame
-    
+
     local moveLabel = Instance.new("TextLabel")
     moveLabel.Size = UDim2.new(1, 0, 1, 0)
     moveLabel.BackgroundTransparency = 1
@@ -73,8 +73,8 @@ local function createTouchGUI()
     moveLabel.TextSize = 28
     moveLabel.Font = Enum.Font.GothamBold
     moveLabel.Parent = moveFrame
-    
-    -- 右側視角搖桿區域（更大範圍）
+
+    -- ===== 右側視角搖桿 =====
     local lookFrame = Instance.new("Frame")
     lookFrame.Name = "LookFrame"
     lookFrame.Size = UDim2.new(0, 300, 0, 300)
@@ -83,11 +83,11 @@ local function createTouchGUI()
     lookFrame.BackgroundTransparency = 0.8
     lookFrame.BorderSizePixel = 0
     lookFrame.Parent = screenGui
-    
+
     local lookCorner = Instance.new("UICorner")
     lookCorner.CornerRadius = UDim.new(0, 150)
     lookCorner.Parent = lookFrame
-    
+
     local lookLabel = Instance.new("TextLabel")
     lookLabel.Size = UDim2.new(1, 0, 1, 0)
     lookLabel.BackgroundTransparency = 1
@@ -96,8 +96,8 @@ local function createTouchGUI()
     lookLabel.TextSize = 28
     lookLabel.Font = Enum.Font.GothamBold
     lookLabel.Parent = lookFrame
-    
-    -- 速度控制按鈕（上下調整高度）
+
+    -- ===== 上升/下降按鈕 =====
     local speedUpBtn = Instance.new("TextButton")
     speedUpBtn.Name = "SpeedUpBtn"
     speedUpBtn.Size = UDim2.new(0, 80, 0, 80)
@@ -109,11 +109,11 @@ local function createTouchGUI()
     speedUpBtn.TextSize = 36
     speedUpBtn.Font = Enum.Font.GothamBold
     speedUpBtn.Parent = screenGui
-    
+
     local upCorner = Instance.new("UICorner")
     upCorner.CornerRadius = UDim.new(0, 40)
     upCorner.Parent = speedUpBtn
-    
+
     local speedDownBtn = Instance.new("TextButton")
     speedDownBtn.Name = "SpeedDownBtn"
     speedDownBtn.Size = UDim2.new(0, 80, 0, 80)
@@ -125,12 +125,12 @@ local function createTouchGUI()
     speedDownBtn.TextSize = 36
     speedDownBtn.Font = Enum.Font.GothamBold
     speedDownBtn.Parent = screenGui
-    
+
     local downCorner = Instance.new("UICorner")
     downCorner.CornerRadius = UDim.new(0, 40)
     downCorner.Parent = speedDownBtn
-    
-    -- 切換按鈕
+
+    -- ===== 主切換按鈕 =====
     local toggleBtn = Instance.new("TextButton")
     toggleBtn.Name = "ToggleBtn"
     toggleBtn.Size = UDim2.new(0, 120, 0, 50)
@@ -144,12 +144,12 @@ local function createTouchGUI()
     toggleBtn.Active = false
     toggleBtn.Draggable = false
     toggleBtn.Parent = screenGui
-    
+
     local toggleCorner = Instance.new("UICorner")
     toggleCorner.CornerRadius = UDim.new(0, 10)
     toggleCorner.Parent = toggleBtn
-    
-    -- 縮小按鈕（獨立元素，不是 toggleBtn 的子元素）
+
+    -- ===== 縮小按鈕（可拖拽）=====
     local minimizeBtn = Instance.new("TextButton")
     minimizeBtn.Name = "MinimizeBtn"
     minimizeBtn.Size = UDim2.new(0, 50, 0, 50)
@@ -164,12 +164,31 @@ local function createTouchGUI()
     minimizeBtn.Active = true
     minimizeBtn.Draggable = true
     minimizeBtn.Parent = screenGui
-    
+
     local minimizeCorner = Instance.new("UICorner")
     minimizeCorner.CornerRadius = UDim.new(0, 10)
     minimizeCorner.Parent = minimizeBtn
-    
-    -- ClickTP 按鈕
+
+    -- ===== 小藍按鈕（清單面板開關）=====
+    -- 尺寸為縮小鍵的 1/2：25x25
+    local listBtn = Instance.new("TextButton")
+    listBtn.Name = "ListBtn"
+    listBtn.Size = UDim2.new(0, 25, 0, 25)
+    listBtn.Position = UDim2.new(0.5, 115, 1, -200)  -- 緊靠 minimizeBtn 右側
+    listBtn.AnchorPoint = Vector2.new(0, 0)
+    listBtn.BackgroundColor3 = Color3.fromRGB(50, 120, 255)
+    listBtn.BackgroundTransparency = 0.2
+    listBtn.Text = "···"
+    listBtn.TextColor3 = Color3.new(1, 1, 1)
+    listBtn.TextSize = 12
+    listBtn.Font = Enum.Font.GothamBold
+    listBtn.Parent = screenGui
+
+    local listBtnCorner = Instance.new("UICorner")
+    listBtnCorner.CornerRadius = UDim.new(0, 6)
+    listBtnCorner.Parent = listBtn
+
+    -- ===== ClickTP 按鈕（在 toggleBtn 下方）=====
     local clickTpBtn = Instance.new("TextButton")
     clickTpBtn.Name = "ClickTpBtn"
     clickTpBtn.Size = UDim2.new(0, 120, 0, 50)
@@ -181,12 +200,12 @@ local function createTouchGUI()
     clickTpBtn.TextSize = 18
     clickTpBtn.Font = Enum.Font.GothamBold
     clickTpBtn.Parent = toggleBtn
-    
+
     local clickTpCorner = Instance.new("UICorner")
     clickTpCorner.CornerRadius = UDim.new(0, 10)
     clickTpCorner.Parent = clickTpBtn
-    
-    -- 關閉按鈕（移到 ClickTP 旁邊）
+
+    -- ===== 關閉按鈕 =====
     local closeBtn = Instance.new("TextButton")
     closeBtn.Name = "CloseBtn"
     closeBtn.Size = UDim2.new(0, 50, 0, 50)
@@ -199,12 +218,12 @@ local function createTouchGUI()
     closeBtn.TextSize = 24
     closeBtn.Font = Enum.Font.GothamBold
     closeBtn.Parent = toggleBtn
-    
+
     local closeCorner = Instance.new("UICorner")
     closeCorner.CornerRadius = UDim.new(0, 10)
     closeCorner.Parent = closeBtn
-    
-    -- 提示標籤
+
+    -- ===== 提示標籤 =====
     local hintLabel = Instance.new("TextLabel")
     hintLabel.Name = "HintLabel"
     hintLabel.Size = UDim2.new(0, 250, 0, 40)
@@ -218,12 +237,12 @@ local function createTouchGUI()
     hintLabel.TextWrapped = true
     hintLabel.Visible = false
     hintLabel.Parent = toggleBtn
-    
+
     local hintCorner = Instance.new("UICorner")
     hintCorner.CornerRadius = UDim.new(0, 8)
     hintCorner.Parent = hintLabel
-    
-    -- 速度控制框架(在 toggleBtn 上方)
+
+    -- ===== 速度控制框架 =====
     local speedFrame = Instance.new("Frame")
     speedFrame.Name = "SpeedFrame"
     speedFrame.Size = UDim2.new(0, 220, 0, 50)
@@ -232,12 +251,11 @@ local function createTouchGUI()
     speedFrame.BackgroundTransparency = 0.2
     speedFrame.Visible = false
     speedFrame.Parent = toggleBtn
-    
+
     local speedFrameCorner = Instance.new("UICorner")
     speedFrameCorner.CornerRadius = UDim.new(0, 8)
     speedFrameCorner.Parent = speedFrame
-    
-    -- 速度標籤
+
     local speedLabelText = Instance.new("TextLabel")
     speedLabelText.Size = UDim2.new(0, 65, 1, 0)
     speedLabelText.Position = UDim2.new(0, 8, 0, 0)
@@ -248,8 +266,7 @@ local function createTouchGUI()
     speedLabelText.Font = Enum.Font.GothamBold
     speedLabelText.TextXAlignment = Enum.TextXAlignment.Left
     speedLabelText.Parent = speedFrame
-    
-    -- 減少按鈕
+
     local speedMinusBtn = Instance.new("TextButton")
     speedMinusBtn.Name = "SpeedMinusBtn"
     speedMinusBtn.Size = UDim2.new(0, 40, 0, 40)
@@ -261,12 +278,11 @@ local function createTouchGUI()
     speedMinusBtn.TextSize = 28
     speedMinusBtn.Font = Enum.Font.GothamBold
     speedMinusBtn.Parent = speedFrame
-    
+
     local minusBtnCorner = Instance.new("UICorner")
     minusBtnCorner.CornerRadius = UDim.new(0, 8)
     minusBtnCorner.Parent = speedMinusBtn
-    
-    -- 速度輸入框
+
     local speedInput = Instance.new("TextBox")
     speedInput.Name = "SpeedInput"
     speedInput.Size = UDim2.new(0, 50, 0, 40)
@@ -280,12 +296,11 @@ local function createTouchGUI()
     speedInput.TextXAlignment = Enum.TextXAlignment.Center
     speedInput.ClearTextOnFocus = false
     speedInput.Parent = speedFrame
-    
+
     local inputCorner = Instance.new("UICorner")
     inputCorner.CornerRadius = UDim.new(0, 8)
     inputCorner.Parent = speedInput
-    
-    -- 增加按鈕
+
     local speedPlusBtn = Instance.new("TextButton")
     speedPlusBtn.Name = "SpeedPlusBtn"
     speedPlusBtn.Size = UDim2.new(0, 40, 0, 40)
@@ -297,59 +312,498 @@ local function createTouchGUI()
     speedPlusBtn.TextSize = 28
     speedPlusBtn.Font = Enum.Font.GothamBold
     speedPlusBtn.Parent = speedFrame
-    
+
     local plusBtnCorner = Instance.new("UICorner")
     plusBtnCorner.CornerRadius = UDim.new(0, 8)
     plusBtnCorner.Parent = speedPlusBtn
-    
-    return screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, minimizeBtn, closeBtn, clickTpBtn, hintLabel, speedFrame, speedInput, speedMinusBtn, speedPlusBtn
+
+    -- ========== 傳送點清單面板（160×210）==========
+    -- 面板左邊 = minimizeBtn 右邊：0.5scale + (60+50)offset = 0.5scale+110offset
+    -- 面板頂部 = minimizeBtn 頂部：1scale + (-200)offset
+    local panelFrame = Instance.new("Frame")
+    panelFrame.Name = "WaypointPanel"
+    panelFrame.Size = UDim2.new(0, 160, 0, 210)
+    panelFrame.Position = UDim2.new(0.5, 115, 1, -200)  -- 左邊 = minimizeBtn右邊，頂部 = minimizeBtn頂部
+    panelFrame.AnchorPoint = Vector2.new(0, 0)
+    panelFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+    panelFrame.BackgroundTransparency = 0.1
+    panelFrame.BorderSizePixel = 0
+    panelFrame.Visible = false
+    panelFrame.ZIndex = 200
+    panelFrame.Parent = screenGui
+
+    local panelCorner = Instance.new("UICorner")
+    panelCorner.CornerRadius = UDim.new(0, 10)
+    panelCorner.Parent = panelFrame
+
+    -- 面板標題列（高度 22）
+    local panelTitleBar = Instance.new("Frame")
+    panelTitleBar.Name = "TitleBar"
+    panelTitleBar.Size = UDim2.new(1, 0, 0, 22)
+    panelTitleBar.Position = UDim2.new(0, 0, 0, 0)
+    panelTitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    panelTitleBar.BackgroundTransparency = 0.0
+    panelTitleBar.BorderSizePixel = 0
+    panelTitleBar.ZIndex = 201
+    panelTitleBar.Parent = panelFrame
+
+    local panelTitleCorner = Instance.new("UICorner")
+    panelTitleCorner.CornerRadius = UDim.new(0, 10)
+    panelTitleCorner.Parent = panelTitleBar
+
+    -- 標題列底部補丁（遮住下圓角）
+    local titlePatch = Instance.new("Frame")
+    titlePatch.Size = UDim2.new(1, 0, 0, 10)
+    titlePatch.Position = UDim2.new(0, 0, 1, -10)
+    titlePatch.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+    titlePatch.BackgroundTransparency = 0.0
+    titlePatch.BorderSizePixel = 0
+    titlePatch.ZIndex = 201
+    titlePatch.Parent = panelTitleBar
+
+    local panelTitle = Instance.new("TextLabel")
+    panelTitle.Size = UDim2.new(1, -28, 1, 0)
+    panelTitle.Position = UDim2.new(0, 28, 0, 0)
+    panelTitle.BackgroundTransparency = 1
+    panelTitle.Text = "📍 傳送點清單"
+    panelTitle.TextColor3 = Color3.fromRGB(200, 210, 255)
+    panelTitle.TextSize = 10
+    panelTitle.Font = Enum.Font.GothamBold
+    panelTitle.TextXAlignment = Enum.TextXAlignment.Left
+    panelTitle.ZIndex = 202
+    panelTitle.Parent = panelTitleBar
+
+    -- 小藍按鈕佔位框（22×22，在標題列左邊）
+    local panelListBtnPlaceholder = Instance.new("Frame")
+    panelListBtnPlaceholder.Name = "PanelListBtnHolder"
+    panelListBtnPlaceholder.Size = UDim2.new(0, 22, 0, 22)
+    panelListBtnPlaceholder.Position = UDim2.new(0, 2, 0, 0)
+    panelListBtnPlaceholder.BackgroundTransparency = 1
+    panelListBtnPlaceholder.ZIndex = 203
+    panelListBtnPlaceholder.Parent = panelTitleBar
+
+    -- ===== 上層固定區（高度 70）=====
+    local topFixed = Instance.new("Frame")
+    topFixed.Name = "TopFixed"
+    topFixed.Size = UDim2.new(1, 0, 0, 70)
+    topFixed.Position = UDim2.new(0, 0, 0, 22)
+    topFixed.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    topFixed.BackgroundTransparency = 0.0
+    topFixed.BorderSizePixel = 0
+    topFixed.ZIndex = 201
+    topFixed.Parent = panelFrame
+
+    -- 設定傳送點按鈕（高度 20）
+    local setWaypointBtn = Instance.new("TextButton")
+    setWaypointBtn.Name = "SetWaypointBtn"
+    setWaypointBtn.Size = UDim2.new(1, -10, 0, 20)
+    setWaypointBtn.Position = UDim2.new(0, 5, 0, 4)
+    setWaypointBtn.BackgroundColor3 = Color3.fromRGB(50, 160, 100)
+    setWaypointBtn.BackgroundTransparency = 0.2
+    setWaypointBtn.Text = "📌 設定傳送點（角色位置）"
+    setWaypointBtn.TextColor3 = Color3.new(1, 1, 1)
+    setWaypointBtn.TextSize = 8
+    setWaypointBtn.Font = Enum.Font.GothamBold
+    setWaypointBtn.TextWrapped = true
+    setWaypointBtn.ZIndex = 202
+    setWaypointBtn.Parent = topFixed
+
+    local setWpCorner = Instance.new("UICorner")
+    setWpCorner.CornerRadius = UDim.new(0, 5)
+    setWpCorner.Parent = setWaypointBtn
+
+    -- 傳送到指定點按鈕（高度 20）
+    local tpToWaypointBtn = Instance.new("TextButton")
+    tpToWaypointBtn.Name = "TpToWaypointBtn"
+    tpToWaypointBtn.Size = UDim2.new(1, -10, 0, 20)
+    tpToWaypointBtn.Position = UDim2.new(0, 5, 0, 28)
+    tpToWaypointBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 210)
+    tpToWaypointBtn.BackgroundTransparency = 0.2
+    tpToWaypointBtn.Text = "🚀 傳送到選定點（角色移動）"
+    tpToWaypointBtn.TextColor3 = Color3.new(1, 1, 1)
+    tpToWaypointBtn.TextSize = 8
+    tpToWaypointBtn.Font = Enum.Font.GothamBold
+    tpToWaypointBtn.TextWrapped = true
+    tpToWaypointBtn.ZIndex = 202
+    tpToWaypointBtn.Parent = topFixed
+
+    local tpWpCorner = Instance.new("UICorner")
+    tpWpCorner.CornerRadius = UDim.new(0, 5)
+    tpWpCorner.Parent = tpToWaypointBtn
+
+    -- 穿透模式勾選列（高度 18）
+    local throughRow = Instance.new("Frame")
+    throughRow.Size = UDim2.new(1, -10, 0, 18)
+    throughRow.Position = UDim2.new(0, 5, 0, 52)
+    throughRow.BackgroundColor3 = Color3.fromRGB(40, 40, 58)
+    throughRow.BackgroundTransparency = 0.2
+    throughRow.BorderSizePixel = 0
+    throughRow.ZIndex = 202
+    throughRow.Parent = topFixed
+
+    local throughRowCorner = Instance.new("UICorner")
+    throughRowCorner.CornerRadius = UDim.new(0, 5)
+    throughRowCorner.Parent = throughRow
+
+    -- 勾選框（14×14）
+    local throughCheck = Instance.new("TextButton")
+    throughCheck.Name = "ThroughCheck"
+    throughCheck.Size = UDim2.new(0, 14, 0, 14)
+    throughCheck.Position = UDim2.new(0, 3, 0, 2)
+    throughCheck.BackgroundColor3 = Color3.fromRGB(50, 160, 100)
+    throughCheck.BackgroundTransparency = 0.1
+    throughCheck.Text = "✓"
+    throughCheck.TextColor3 = Color3.new(1, 1, 1)
+    throughCheck.TextSize = 10
+    throughCheck.Font = Enum.Font.GothamBold
+    throughCheck.ZIndex = 203
+    throughCheck.Parent = throughRow
+
+    local throughCheckCorner = Instance.new("UICorner")
+    throughCheckCorner.CornerRadius = UDim.new(0, 4)
+    throughCheckCorner.Parent = throughCheck
+
+    local throughLabel = Instance.new("TextLabel")
+    throughLabel.Size = UDim2.new(1, -22, 1, 0)
+    throughLabel.Position = UDim2.new(0, 20, 0, 0)
+    throughLabel.BackgroundTransparency = 1
+    throughLabel.Text = "穿透模式（無視透明物件）"
+    throughLabel.TextColor3 = Color3.fromRGB(200, 210, 255)
+    throughLabel.TextSize = 8
+    throughLabel.Font = Enum.Font.Gotham
+    throughLabel.TextXAlignment = Enum.TextXAlignment.Left
+    throughLabel.TextWrapped = true
+    throughLabel.ZIndex = 203
+    throughLabel.Parent = throughRow
+
+    -- ===== 下層可滑動清單區（面板210 - 標題22 - 上層70 = 118）=====
+    local listArea = Instance.new("Frame")
+    listArea.Name = "ListArea"
+    listArea.Size = UDim2.new(1, 0, 1, -92)
+    listArea.Position = UDim2.new(0, 0, 0, 92)
+    listArea.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+    listArea.BackgroundTransparency = 0.0
+    listArea.BorderSizePixel = 0
+    listArea.ClipsDescendants = true
+    listArea.ZIndex = 201
+    listArea.Parent = panelFrame
+
+    local listAreaBottomCorner = Instance.new("UICorner")
+    listAreaBottomCorner.CornerRadius = UDim.new(0, 10)
+    listAreaBottomCorner.Parent = listArea
+
+    -- 空列表提示
+    local emptyLabel = Instance.new("TextLabel")
+    emptyLabel.Name = "EmptyLabel"
+    emptyLabel.Size = UDim2.new(1, 0, 1, 0)
+    emptyLabel.BackgroundTransparency = 1
+    emptyLabel.Text = "尚無傳送點\n點擊上方按鈕新增"
+    emptyLabel.TextColor3 = Color3.fromRGB(120, 120, 150)
+    emptyLabel.TextSize = 9
+    emptyLabel.Font = Enum.Font.Gotham
+    emptyLabel.ZIndex = 202
+    emptyLabel.Parent = listArea
+
+    -- ScrollingFrame（可滑動）
+    local scrollFrame = Instance.new("ScrollingFrame")
+    scrollFrame.Name = "ScrollFrame"
+    scrollFrame.Size = UDim2.new(1, 0, 1, 0)
+    scrollFrame.Position = UDim2.new(0, 0, 0, 0)
+    scrollFrame.BackgroundTransparency = 1
+    scrollFrame.BorderSizePixel = 0
+    scrollFrame.ScrollBarThickness = 3
+    scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 100, 200)
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scrollFrame.ZIndex = 202
+    scrollFrame.Parent = listArea
+
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.Padding = UDim.new(0, 3)
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Parent = scrollFrame
+
+    local listPadding = Instance.new("UIPadding")
+    listPadding.PaddingTop = UDim.new(0, 3)
+    listPadding.PaddingLeft = UDim.new(0, 4)
+    listPadding.PaddingRight = UDim.new(0, 4)
+    listPadding.PaddingBottom = UDim.new(0, 3)
+    listPadding.Parent = scrollFrame
+
+    return screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, minimizeBtn, closeBtn,
+           clickTpBtn, hintLabel, speedFrame, speedInput, speedMinusBtn, speedPlusBtn,
+           listBtn, panelFrame, setWaypointBtn, tpToWaypointBtn, throughCheck,
+           scrollFrame, listLayout, emptyLabel
 end
 
--- 保存角色原始位置
+-- ========== 初始化 GUI ==========
+local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, minimizeBtn, closeBtn,
+      clickTpBtn, hintLabel, speedFrame, speedInput, speedMinusBtn, speedPlusBtn,
+      listBtn, panelFrame, setWaypointBtn, tpToWaypointBtn, throughCheck,
+      scrollFrame, listLayout, emptyLabel = createTouchGUI()
+
+-- ========== 保存角色原始位置 ==========
 local savedCharacterCFrame = nil
 local rootPart = nil
 
--- 啟用 Freecam
+-- ========== 傳送點清單 UI 更新 ==========
+local function updateWaypointListUI()
+    -- 清除舊有條目
+    for _, child in ipairs(scrollFrame:GetChildren()) do
+        if child:IsA("Frame") then
+            child:Destroy()
+        end
+    end
+
+    if #waypointList == 0 then
+        emptyLabel.Visible = true
+        scrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+        return
+    end
+
+    emptyLabel.Visible = false
+
+    for i, wp in ipairs(waypointList) do
+        -- 根據傳送點類型選擇底色
+        -- isCamFrame=true（鏡頭點）：藍紫色系
+        -- isCamFrame=false/nil（角色點）：綠青色系
+        local baseColor
+        local selectedColor
+        if wp.isCamFrame then
+            baseColor = (selectedWaypointIndex == i)
+                and Color3.fromRGB(60, 60, 180)
+                or Color3.fromRGB(30, 30, 70)
+            selectedColor = Color3.fromRGB(60, 60, 180)
+        else
+            baseColor = (selectedWaypointIndex == i)
+                and Color3.fromRGB(30, 90, 60)
+                or Color3.fromRGB(20, 50, 35)
+            selectedColor = Color3.fromRGB(30, 90, 60)
+        end
+
+        local itemFrame = Instance.new("Frame")
+        itemFrame.Name = "WaypointItem_" .. i
+        itemFrame.Size = UDim2.new(1, 0, 0, 28)
+        itemFrame.BackgroundColor3 = baseColor
+        itemFrame.BackgroundTransparency = 0.15
+        itemFrame.BorderSizePixel = 0
+        itemFrame.LayoutOrder = i
+        itemFrame.ZIndex = 203
+        itemFrame.Parent = scrollFrame
+
+        local itemCorner = Instance.new("UICorner")
+        itemCorner.CornerRadius = UDim.new(0, 5)
+        itemCorner.Parent = itemFrame
+
+        -- 左側色條（區分類型）
+        local typeBar = Instance.new("Frame")
+        typeBar.Size = UDim2.new(0, 3, 1, -4)
+        typeBar.Position = UDim2.new(0, 2, 0, 2)
+        typeBar.BackgroundColor3 = wp.isCamFrame
+            and Color3.fromRGB(100, 140, 255)  -- 鏡頭點：藍
+            or Color3.fromRGB(80, 200, 130)     -- 角色點：綠
+        typeBar.BackgroundTransparency = 0.0
+        typeBar.BorderSizePixel = 0
+        typeBar.ZIndex = 205
+        typeBar.Parent = itemFrame
+
+        local typeBarCorner = Instance.new("UICorner")
+        typeBarCorner.CornerRadius = UDim.new(0, 2)
+        typeBarCorner.Parent = typeBar
+
+        -- 選中指示器（透明覆蓋整個 frame）
+        local selectBtn = Instance.new("TextButton")
+        selectBtn.Size = UDim2.new(1, 0, 1, 0)
+        selectBtn.BackgroundTransparency = 1
+        selectBtn.Text = ""
+        selectBtn.ZIndex = 204
+        selectBtn.Parent = itemFrame
+
+        -- 序號標籤
+        local numLabel = Instance.new("TextLabel")
+        numLabel.Size = UDim2.new(0, 16, 1, 0)
+        numLabel.Position = UDim2.new(0, 8, 0, 0)
+        numLabel.BackgroundTransparency = 1
+        numLabel.Text = tostring(i)
+        numLabel.TextColor3 = wp.isCamFrame
+            and Color3.fromRGB(140, 170, 255)
+            or Color3.fromRGB(120, 210, 160)
+        numLabel.TextSize = 9
+        numLabel.Font = Enum.Font.GothamBold
+        numLabel.ZIndex = 204
+        numLabel.Parent = itemFrame
+
+        -- 類型圖示小標籤
+        local typeIcon = Instance.new("TextLabel")
+        typeIcon.Size = UDim2.new(0, 12, 1, 0)
+        typeIcon.Position = UDim2.new(0, 24, 0, 0)
+        typeIcon.BackgroundTransparency = 1
+        typeIcon.Text = wp.isCamFrame and "🎥" or "📌"
+        typeIcon.TextSize = 8
+        typeIcon.Font = Enum.Font.GothamBold
+        typeIcon.ZIndex = 204
+        typeIcon.Parent = itemFrame
+
+        -- 名稱標籤（可改名）
+        local nameLabel = Instance.new("TextBox")
+        nameLabel.Name = "NameBox"
+        nameLabel.Size = UDim2.new(1, -60, 1, 0)
+        nameLabel.Position = UDim2.new(0, 38, 0, 0)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Text = wp.name
+        nameLabel.TextColor3 = Color3.fromRGB(220, 225, 255)
+        nameLabel.TextSize = 9
+        nameLabel.Font = Enum.Font.Gotham
+        nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+        nameLabel.ClearTextOnFocus = false
+        nameLabel.ZIndex = 205
+        nameLabel.Parent = itemFrame
+
+        -- 改名邏輯
+        nameLabel.FocusLost:Connect(function()
+            local newName = nameLabel.Text
+            if newName ~= "" then
+                waypointList[i].name = newName
+            else
+                nameLabel.Text = waypointList[i].name
+            end
+        end)
+
+        -- 刪除按鈕（正圓形）
+        local deleteBtn = Instance.new("TextButton")
+        deleteBtn.Size = UDim2.new(0, 18, 0, 18)
+        deleteBtn.Position = UDim2.new(1, -21, 0.5, -9)
+        deleteBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+        deleteBtn.BackgroundTransparency = 0.2
+        deleteBtn.Text = "×"
+        deleteBtn.TextColor3 = Color3.new(1, 1, 1)
+        deleteBtn.TextSize = 14
+        deleteBtn.Font = Enum.Font.GothamBold
+        deleteBtn.ZIndex = 205
+        deleteBtn.Parent = itemFrame
+
+        local delCorner = Instance.new("UICorner")
+        delCorner.CornerRadius = UDim.new(0.5, 0)  -- 完全圓形
+        delCorner.Parent = deleteBtn
+
+        -- 點擊條目選中
+        local captureIndex = i
+        selectBtn.MouseButton1Click:Connect(function()
+            selectedWaypointIndex = captureIndex
+            updateWaypointListUI()
+        end)
+
+        deleteBtn.MouseButton1Click:Connect(function()
+            table.remove(waypointList, captureIndex)
+            if selectedWaypointIndex == captureIndex then
+                selectedWaypointIndex = nil
+            elseif selectedWaypointIndex and selectedWaypointIndex > captureIndex then
+                selectedWaypointIndex = selectedWaypointIndex - 1
+            end
+            updateWaypointListUI()
+        end)
+    end
+
+    -- 更新滾動範圍
+    local itemHeight = 28
+    local padding = 3
+    local totalH = #waypointList * (itemHeight + padding) + padding + 6
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, totalH)
+end
+
+-- ========== 更新按鈕文字（根據 Freecam 狀態）==========
+local function updatePanelBtnTexts()
+    if freecamEnabled then
+        setWaypointBtn.Text = "📷 設定鏡頭位置為傳送點"
+        tpToWaypointBtn.Text = "🎥 移動鏡頭到選定點"
+    else
+        setWaypointBtn.Text = "📌 設定傳送點（角色位置）"
+        tpToWaypointBtn.Text = "🚀 傳送到選定點（角色移動）"
+    end
+end
+
+-- ========== 穿透模式 UI 更新 ==========
+local function updateThroughCheckUI()
+    if isThroughMode then
+        throughCheck.Text = "✓"
+        throughCheck.BackgroundColor3 = Color3.fromRGB(50, 160, 100)
+    else
+        throughCheck.Text = ""
+        throughCheck.BackgroundColor3 = Color3.fromRGB(80, 80, 100)
+    end
+end
+
+-- ========== 面板開關 ==========
+local function openPanel()
+    isPanelOpen = true
+    panelFrame.Visible = true
+    updatePanelBtnTexts()
+    updateWaypointListUI()
+
+    -- 把小藍按鈕移到面板標題列左上角（22×22 佔滿佔位框）
+    listBtn.Parent = panelFrame:FindFirstChild("TitleBar"):FindFirstChild("PanelListBtnHolder")
+    listBtn.Size = UDim2.new(1, 0, 1, 0)
+    listBtn.Position = UDim2.new(0, 0, 0, 0)
+    listBtn.AnchorPoint = Vector2.new(0, 0)
+end
+
+local function closePanel()
+    isPanelOpen = false
+    panelFrame.Visible = false
+
+    -- 把小藍按鈕移回 screenGui，靠 minimizeBtn 右側
+    listBtn.Parent = screenGui
+    listBtn.Size = UDim2.new(0, 25, 0, 25)
+    listBtn.AnchorPoint = Vector2.new(0, 0)
+
+    -- 同步位置：緊靠 minimizeBtn 右邊
+    local minPos = minimizeBtn.Position
+    listBtn.Position = UDim2.new(minPos.X.Scale, minPos.X.Offset + 55, minPos.Y.Scale, minPos.Y.Offset + 12)
+end
+
+-- ========== 啟用 Freecam ==========
 local function enableFreecam()
     freecamEnabled = true
     camera.CameraType = Enum.CameraType.Scriptable
     cameraCFrame = camera.CFrame
-    
+
     if character then
         rootPart = character:FindFirstChild("HumanoidRootPart")
         if rootPart then
             savedCharacterCFrame = rootPart.CFrame
             rootPart.Anchored = true
         end
-        
+
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if humanoid then
             humanoid.AutoRotate = false
         end
     end
+
+    if isPanelOpen then
+        updatePanelBtnTexts()
+    end
 end
 
--- 禁用 Freecam
+-- ========== 禁用 Freecam ==========
 local function disableFreecam()
     freecamEnabled = false
     camera.CameraType = Enum.CameraType.Custom
-    
+
     if character then
         if rootPart then
             rootPart.Anchored = false
         end
-        
+
         local humanoid = character:FindFirstChildOfClass("Humanoid")
         if humanoid then
             humanoid.AutoRotate = true
         end
         camera.CameraSubject = character:FindFirstChildOfClass("Humanoid")
     end
-    
+
     rootPart = nil
     savedCharacterCFrame = nil
-    
-    -- 更新按鈕狀態
+
     if toggleBtn then
         toggleBtn.Text = "開啟 Freecam"
         toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
@@ -358,35 +812,33 @@ local function disableFreecam()
             lookFrame.Visible = false
             speedUpBtn.Visible = false
             speedDownBtn.Visible = false
-            speedFrame.Visible = false  -- 隱藏速度框
+            speedFrame.Visible = false
         end
+    end
+
+    if isPanelOpen then
+        updatePanelBtnTexts()
     end
 end
 
--- 初始化
-local screenGui, moveFrame, lookFrame, speedUpBtn, speedDownBtn, toggleBtn, minimizeBtn, closeBtn, clickTpBtn, hintLabel, speedFrame, speedInput, speedMinusBtn, speedPlusBtn = createTouchGUI()
-
--- 更新速度函數
+-- ========== 更新速度 ==========
 local function updateSpeed()
     moveSpeed = baseSpeed * speedMultiplier
     verticalSpeed = baseVerticalSpeed * speedMultiplier
 end
 
--- 速度輸入框邏輯
-speedInput.FocusLost:Connect(function(enterPressed)
+-- ========== 速度輸入框 ==========
+speedInput.FocusLost:Connect(function()
     local value = tonumber(speedInput.Text)
     if value and value >= 0 and value <= 99 then
         speedMultiplier = value
-        -- 格式化顯示（如果是整數就不顯示小數點）
         if speedMultiplier == math.floor(speedMultiplier) then
             speedInput.Text = tostring(math.floor(speedMultiplier))
         else
             speedInput.Text = string.format("%.2f", speedMultiplier)
         end
         updateSpeed()
-        print("速度倍數設為: " .. speedMultiplier .. "x")
     else
-        -- 格式化顯示當前值
         if speedMultiplier == math.floor(speedMultiplier) then
             speedInput.Text = tostring(math.floor(speedMultiplier))
         else
@@ -395,7 +847,6 @@ speedInput.FocusLost:Connect(function(enterPressed)
     end
 end)
 
--- 減少速度按鈕
 speedMinusBtn.MouseButton1Click:Connect(function()
     if speedMultiplier > 0 then
         speedMultiplier = math.max(0, speedMultiplier - 1)
@@ -405,11 +856,9 @@ speedMinusBtn.MouseButton1Click:Connect(function()
             speedInput.Text = string.format("%.2f", speedMultiplier)
         end
         updateSpeed()
-        print("速度倍數: " .. speedMultiplier .. "x")
     end
 end)
 
--- 增加速度按鈕
 speedPlusBtn.MouseButton1Click:Connect(function()
     if speedMultiplier < 99 then
         speedMultiplier = math.min(99, speedMultiplier + 1)
@@ -419,24 +868,29 @@ speedPlusBtn.MouseButton1Click:Connect(function()
             speedInput.Text = string.format("%.2f", speedMultiplier)
         end
         updateSpeed()
-        print("速度倍數: " .. speedMultiplier .. "x")
     end
 end)
 
--- 縮小/展開功能
+-- ========== 縮小/展開 ==========
 local function toggleMinimize()
     isMinimized = not isMinimized
-    
+
     if isMinimized then
-        -- 縮小：隱藏所有按鈕（除了縮小鈕）
         minimizeBtn.Text = "+"
         toggleBtn.Visible = false
         clickTpBtn.Visible = false
         closeBtn.Visible = false
         hintLabel.Visible = false
         speedFrame.Visible = false
-        
-        -- 如果 Freecam 開啟，也隱藏操控按鈕
+        -- 小藍按鈕一起隱藏（如果在 screenGui 上）
+        if listBtn.Parent == screenGui then
+            listBtn.Visible = false
+        end
+        -- 面板也關閉
+        if isPanelOpen then
+            closePanel()
+        end
+
         if freecamEnabled then
             moveFrame.Visible = false
             lookFrame.Visible = false
@@ -444,39 +898,39 @@ local function toggleMinimize()
             speedDownBtn.Visible = false
         end
     else
-        -- 展開：顯示按鈕
         minimizeBtn.Text = "−"
         toggleBtn.Visible = true
         clickTpBtn.Visible = true
         closeBtn.Visible = true
-        
-        -- 如果 Freecam 開啟，顯示操控按鈕和速度框
+        -- 小藍按鈕一起顯示
+        if listBtn.Parent == screenGui then
+            listBtn.Visible = true
+        end
+
         if freecamEnabled then
             moveFrame.Visible = true
             lookFrame.Visible = true
             speedUpBtn.Visible = true
             speedDownBtn.Visible = true
             speedFrame.Visible = true
-            
-            -- 如果 ClickTP 開啟，顯示提示
-            if clickTpEnabled then
+
+            if clickTpEnabled and hintLabel then
                 hintLabel.Visible = true
             end
         end
     end
 end
 
--- 監聽角色死亡
+-- ========== 角色死亡監聽 ==========
 local function onCharacterAdded(newCharacter)
     character = newCharacter
-    
+
     local humanoid = character:WaitForChild("Humanoid")
     humanoid.Died:Connect(function()
         if freecamEnabled then
             freecamEnabled = false
             camera.CameraType = Enum.CameraType.Custom
-            
-            -- 更新按鈕和UI狀態
+
             toggleBtn.Text = "開啟 Freecam"
             toggleBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
             if not isMinimized then
@@ -484,31 +938,31 @@ local function onCharacterAdded(newCharacter)
                 lookFrame.Visible = false
                 speedUpBtn.Visible = false
                 speedDownBtn.Visible = false
-                speedFrame.Visible = false  -- 隱藏速度框
+                speedFrame.Visible = false
             end
-            
+
             rootPart = nil
             savedCharacterCFrame = nil
-            
+
+            if isPanelOpen then
+                updatePanelBtnTexts()
+            end
+
             print("角色死亡，Freecam 已自動關閉")
         end
     end)
 end
 
--- 初始角色
 if character then
     onCharacterAdded(character)
 end
-
--- 監聽角色重生
 player.CharacterAdded:Connect(onCharacterAdded)
 
--- 追蹤拖拽狀態
+-- ========== 拖拽同步 ==========
 local isDragging = false
 local dragStartPos = nil
 local minimizeDragStart = nil
 
--- 縮小按鈕拖拽邏輯
 minimizeBtn.MouseButton1Down:Connect(function()
     minimizeDragStart = minimizeBtn.Position
     isDragging = false
@@ -517,13 +971,18 @@ end)
 minimizeBtn:GetPropertyChangedSignal("Position"):Connect(function()
     if minimizeDragStart then
         isDragging = true
-        -- 計算偏移量
         local offset = minimizeBtn.Position - minimizeDragStart
-        
-        -- 同步移動所有按鈕
+
         toggleBtn.Position = toggleBtn.Position + offset
-        
-        -- 更新起始位置
+
+        -- 同步 listBtn 位置（當它在 screenGui 時）
+        if listBtn.Parent == screenGui then
+            listBtn.Position = listBtn.Position + offset
+        end
+
+        -- 同步面板位置（無論面板是否開啟都跟著動）
+        panelFrame.Position = panelFrame.Position + offset
+
         minimizeDragStart = minimizeBtn.Position
     end
 end)
@@ -532,39 +991,16 @@ toggleBtn.MouseButton1Down:Connect(function()
     isDragging = false
 end)
 
--- 防止按鈕觸發拖拽
-clickTpBtn.MouseButton1Down:Connect(function()
-    -- 阻止事件冒泡
-end)
-
-closeBtn.MouseButton1Down:Connect(function()
-    -- 阻止事件冒泡
-end)
-
-minimizeBtn.MouseButton1Down:Connect(function()
-    -- 阻止事件冒泡
-end)
-
-speedMinusBtn.MouseButton1Down:Connect(function()
-    -- 阻止事件冒泡
-end)
-
-speedPlusBtn.MouseButton1Down:Connect(function()
-    -- 阻止事件冒泡
-end)
-
 speedInput.Focused:Connect(function()
-    -- 輸入框獲得焦點時，暫時禁用拖拽
     minimizeBtn.Draggable = false
 end)
 
 speedInput.FocusLost:Connect(function()
-    -- 輸入框失去焦點時，恢復拖拽
     task.wait(0.1)
     minimizeBtn.Draggable = true
 end)
 
--- 獲取觸控位置相對於框架中心的偏移
+-- ========== 觸控偏移計算 ==========
 local function getTouchOffset(touch, frame)
     local frameCenter = frame.AbsolutePosition + frame.AbsoluteSize / 2
     local touchPos = Vector2.new(touch.Position.X, touch.Position.Y)
@@ -573,23 +1009,21 @@ local function getTouchOffset(touch, frame)
     return offset / maxDist
 end
 
--- 處理觸控輸入
+-- ========== 觸控輸入 ==========
 UserInputService.TouchStarted:Connect(function(touch, gameProcessed)
     if gameProcessed then return end
     if not freecamEnabled then return end
     if isMinimized then return end
-    
+
     local touchPos = Vector2.new(touch.Position.X, touch.Position.Y)
-    
-    -- 檢查是否在移動區域
+
     local moveMin = moveFrame.AbsolutePosition
     local moveMax = moveMin + moveFrame.AbsoluteSize
     if touchPos.X >= moveMin.X and touchPos.X <= moveMax.X and
        touchPos.Y >= moveMin.Y and touchPos.Y <= moveMax.Y then
         moveTouch = touch
     end
-    
-    -- 檢查是否在視角區域
+
     local lookMin = lookFrame.AbsolutePosition
     local lookMax = lookMin + lookFrame.AbsoluteSize
     if touchPos.X >= lookMin.X and touchPos.X <= lookMax.X and
@@ -607,37 +1041,31 @@ UserInputService.TouchEnded:Connect(function(touch, gameProcessed)
     end
 end)
 
--- 高度控制按鈕
+-- ========== 高度控制 ==========
 speedUpBtn.MouseButton1Down:Connect(function()
     speedTouch = "up"
 end)
-
 speedUpBtn.MouseButton1Up:Connect(function()
     if speedTouch == "up" then speedTouch = nil end
 end)
-
 speedDownBtn.MouseButton1Down:Connect(function()
     speedTouch = "down"
 end)
-
 speedDownBtn.MouseButton1Up:Connect(function()
     if speedTouch == "down" then speedTouch = nil end
 end)
 
--- 縮小按鈕
+-- ========== 縮小按鈕 ==========
 minimizeBtn.MouseButton1Click:Connect(function()
-    -- 只有在沒有拖拽時才觸發縮小
     if not isDragging then
         toggleMinimize()
     end
-    -- 重置拖拽狀態
     isDragging = false
     minimizeDragStart = nil
 end)
 
--- 切換按鈕
+-- ========== 切換 Freecam ==========
 toggleBtn.MouseButton1Click:Connect(function()
-    -- 只有在沒有拖拽時才觸發切換
     if not isDragging then
         if freecamEnabled then
             disableFreecam()
@@ -661,20 +1089,17 @@ toggleBtn.MouseButton1Click:Connect(function()
                 speedUpBtn.Visible = true
                 speedDownBtn.Visible = true
                 speedFrame.Visible = true
-                -- 如果 ClickTP 開啟，顯示提示
                 if clickTpEnabled and hintLabel then
                     hintLabel.Visible = true
-                    print("Freecam開啟 - 提示標籤已顯示")
                 end
             end
         end
     end
-    -- 重置拖拽狀態
     isDragging = false
     minimizeDragStart = nil
 end)
 
--- 關閉按鈕（移除整個 GUI）
+-- ========== 關閉腳本 ==========
 closeBtn.MouseButton1Click:Connect(function()
     if freecamEnabled then
         disableFreecam()
@@ -683,87 +1108,211 @@ closeBtn.MouseButton1Click:Connect(function()
     print("Freecam 腳本已關閉")
 end)
 
--- ClickTP 按鈕
+-- ========== ClickTP 切換 ==========
 clickTpBtn.MouseButton1Click:Connect(function()
     clickTpEnabled = not clickTpEnabled
     if clickTpEnabled then
         clickTpBtn.Text = "ClickTP: 開"
         clickTpBtn.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
-        print("ClickTP 已開啟")
-        -- 如果在 Freecam 模式下且未縮小，顯示提示
         if freecamEnabled and not isMinimized and hintLabel then
             hintLabel.Visible = true
-            print("提示標籤已顯示")
-            -- 5秒後自動隱藏提示
             task.delay(5, function()
                 if hintLabel and hintLabel.Parent then
                     hintLabel.Visible = false
-                    print("提示標籤已隱藏")
                 end
             end)
         end
     else
         clickTpBtn.Text = "ClickTP: 關"
         clickTpBtn.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
-        print("ClickTP 已關閉")
         if hintLabel then
             hintLabel.Visible = false
         end
     end
 end)
 
--- ClickTP 功能
+-- ========== 小藍按鈕（清單面板）==========
+listBtn.MouseButton1Click:Connect(function()
+    if isPanelOpen then
+        closePanel()
+    else
+        if not isMinimized then
+            openPanel()
+        end
+    end
+end)
+
+-- ========== 穿透模式勾選 ==========
+throughCheck.MouseButton1Click:Connect(function()
+    isThroughMode = not isThroughMode
+    updateThroughCheckUI()
+    print("穿透模式: " .. (isThroughMode and "開啟" or "關閉"))
+end)
+
+-- ========== 設定傳送點按鈕 ==========
+setWaypointBtn.MouseButton1Click:Connect(function()
+    waypointCounter = waypointCounter + 1
+    local wpName = "傳送點 " .. waypointCounter
+
+    if freecamEnabled then
+        -- Freecam 模式：記錄鏡頭的 CFrame
+        waypointList[#waypointList + 1] = {
+            name = wpName,
+            position = cameraCFrame.Position,
+            cframe = cameraCFrame,
+            isCamFrame = true
+        }
+        print("已設定鏡頭傳送點: " .. wpName)
+    else
+        -- 普通模式：記錄角色位置
+        if character then
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                waypointList[#waypointList + 1] = {
+                    name = wpName,
+                    position = hrp.Position,
+                    cframe = hrp.CFrame,
+                    isCamFrame = false
+                }
+                print("已設定角色傳送點: " .. wpName)
+            end
+        end
+    end
+
+    updateWaypointListUI()
+end)
+
+-- ========== 傳送到選定點按鈕 ==========
+tpToWaypointBtn.MouseButton1Click:Connect(function()
+    if not selectedWaypointIndex then
+        print("請先在清單中選擇一個傳送點")
+        return
+    end
+
+    local wp = waypointList[selectedWaypointIndex]
+    if not wp then return end
+
+    if freecamEnabled then
+        -- Freecam 模式：只移動鏡頭
+        cameraCFrame = wp.cframe
+        camera.CFrame = cameraCFrame
+        print("鏡頭已移動到: " .. wp.name)
+    else
+        -- 普通模式：移動角色
+        if character then
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.CFrame = wp.cframe
+                print("角色已傳送到: " .. wp.name)
+            end
+        end
+    end
+end)
+
+-- ========== 穿透模式射線輔助函數 ==========
+-- 用遞迴方式忽略透明物件，直到打到不透明物件
+local function raycastThroughTransparent(origin, direction, params, maxBounces)
+    maxBounces = maxBounces or 20
+    local excludeList = params.FilterDescendantsInstances or {}
+    local currentExclude = {}
+    for _, v in ipairs(excludeList) do
+        table.insert(currentExclude, v)
+    end
+
+    for _ = 1, maxBounces do
+        local p = RaycastParams.new()
+        p.FilterType = Enum.RaycastFilterType.Exclude
+        p.FilterDescendantsInstances = currentExclude
+
+        local result = workspace:Raycast(origin, direction, p)
+        if not result then break end
+
+        local hit = result.Instance
+        -- 取得透明度（考慮父層 Model 的 LocalTransparencyModifier）
+        local transparency = hit.Transparency
+        if hit:IsA("BasePart") and transparency >= 0.9 then
+            -- 透明物件：加入排除，繼續偵測
+            table.insert(currentExclude, hit)
+        else
+            -- 不透明（或半透明）：返回結果
+            return result
+        end
+    end
+
+    return nil
+end
+
+-- ========== ClickTP 功能 ==========
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if not clickTpEnabled then return end
-    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and 
+    if input.UserInputType ~= Enum.UserInputType.MouseButton1 and
        input.UserInputType ~= Enum.UserInputType.Touch then return end
-    
+
     local touchPos = Vector2.new(input.Position.X, input.Position.Y)
-    
-    -- 檢查是否點擊在切換按鈕區域
+
+    -- 排除面板區域
+    if isPanelOpen and panelFrame.Visible then
+        local panMin = panelFrame.AbsolutePosition
+        local panMax = panMin + panelFrame.AbsoluteSize
+        if touchPos.X >= panMin.X and touchPos.X <= panMax.X and
+           touchPos.Y >= panMin.Y and touchPos.Y <= panMax.Y then
+            return
+        end
+    end
+
+    -- 排除 toggleBtn 區域
     if toggleBtn.Visible then
         local toggleMin = toggleBtn.AbsolutePosition
-        local toggleMax = toggleMin + toggleBtn.AbsoluteSize + Vector2.new(math.max(closeBtn.AbsoluteSize.X, minimizeBtn.AbsoluteSize.X), clickTpBtn.AbsoluteSize.Y + closeBtn.AbsoluteSize.Y)
+        local toggleMax = toggleMin + toggleBtn.AbsoluteSize + Vector2.new(
+            math.max(closeBtn.AbsoluteSize.X, minimizeBtn.AbsoluteSize.X),
+            clickTpBtn.AbsoluteSize.Y + closeBtn.AbsoluteSize.Y
+        )
         if touchPos.X >= toggleMin.X and touchPos.X <= toggleMax.X and
            touchPos.Y >= toggleMin.Y and touchPos.Y <= toggleMax.Y then
             return
         end
     end
-    
-    -- 檢查縮小按鈕區域
+
+    -- 排除 minimizeBtn 區域
     local minMin = minimizeBtn.AbsolutePosition
     local minMax = minMin + minimizeBtn.AbsoluteSize
     if touchPos.X >= minMin.X and touchPos.X <= minMax.X and
        touchPos.Y >= minMin.Y and touchPos.Y <= minMax.Y then
         return
     end
-    
-    -- 如果在 Freecam 模式下且未縮小，檢查是否點擊在控制區域
+
+    -- 排除 listBtn 區域（當在 screenGui 時）
+    if listBtn.Parent == screenGui and listBtn.Visible then
+        local listMin = listBtn.AbsolutePosition
+        local listMax = listMin + listBtn.AbsoluteSize
+        if touchPos.X >= listMin.X and touchPos.X <= listMax.X and
+           touchPos.Y >= listMin.Y and touchPos.Y <= listMax.Y then
+            return
+        end
+    end
+
     if freecamEnabled and not isMinimized then
-        -- 檢查是否在移動區域
         local moveMin = moveFrame.AbsolutePosition
         local moveMax = moveMin + moveFrame.AbsoluteSize
         if touchPos.X >= moveMin.X and touchPos.X <= moveMax.X and
            touchPos.Y >= moveMin.Y and touchPos.Y <= moveMax.Y then
             return
         end
-        
-        -- 檢查是否在視角區域
+
         local lookMin = lookFrame.AbsolutePosition
         local lookMax = lookMin + lookFrame.AbsoluteSize
         if touchPos.X >= lookMin.X and touchPos.X <= lookMax.X and
            touchPos.Y >= lookMin.Y and touchPos.Y <= lookMax.Y then
             return
         end
-        
-        -- 檢查是否在上下按鈕區域
+
         local upMin = speedUpBtn.AbsolutePosition
         local upMax = upMin + speedUpBtn.AbsoluteSize
         if touchPos.X >= upMin.X and touchPos.X <= upMax.X and
            touchPos.Y >= upMin.Y and touchPos.Y <= upMax.Y then
             return
         end
-        
+
         local downMin = speedDownBtn.AbsolutePosition
         local downMax = downMin + speedDownBtn.AbsoluteSize
         if touchPos.X >= downMin.X and touchPos.X <= downMax.X and
@@ -771,22 +1320,32 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
             return
         end
     end
-    
+
     -- 執行瞬移
     local mouseLocation = UserInputService:GetMouseLocation()
     local unitRay = camera:ViewportPointToRay(mouseLocation.X, mouseLocation.Y)
     local raycastParams = RaycastParams.new()
     raycastParams.FilterType = Enum.RaycastFilterType.Exclude
     raycastParams.FilterDescendantsInstances = {character}
-    
-    local raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
-    
+
+    local raycastResult
+
+    if isThroughMode then
+        -- 穿透模式：忽略透明物件
+        raycastResult = raycastThroughTransparent(
+            unitRay.Origin,
+            unitRay.Direction * 1000,
+            raycastParams
+        )
+    else
+        raycastResult = workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
+    end
+
     if raycastResult and character then
         local hrp = character:FindFirstChild("HumanoidRootPart")
         if hrp then
             local targetPos = raycastResult.Position + Vector3.new(0, 3, 0)
-            
-            -- 如果在 Freecam 模式下，需要先解除固定再瞬移
+
             if freecamEnabled then
                 hrp.Anchored = false
                 hrp.CFrame = CFrame.new(targetPos)
@@ -803,59 +1362,53 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- 初始隱藏控制元件
+-- ========== 初始隱藏 ==========
 moveFrame.Visible = false
 lookFrame.Visible = false
 speedUpBtn.Visible = false
 speedDownBtn.Visible = false
 
--- 更新相機
+updateThroughCheckUI()
+
+-- ========== 相機更新 ==========
 RunService.RenderStepped:Connect(function(deltaTime)
     if not freecamEnabled then return end
-    
-    -- 確保角色保持靜止
+
     if rootPart and savedCharacterCFrame then
         rootPart.CFrame = savedCharacterCFrame
         rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
         rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     end
-    
+
     local moveVector = Vector3.new(0, 0, 0)
-    
-    -- 處理移動觸控
+
     if moveTouch then
         local offset = getTouchOffset(moveTouch, moveFrame)
         moveVector = Vector3.new(offset.X, 0, -offset.Y)
     end
-    
-    -- 處理視角觸控
+
     if lookTouch then
         local offset = getTouchOffset(lookTouch, lookFrame)
         local rotX = -offset.Y * rotationSpeed * 100 * deltaTime
         local rotY = -offset.X * rotationSpeed * 100 * deltaTime
-        
-        local lookVector = cameraCFrame.LookVector
-        local rightVector = cameraCFrame.RightVector
-        
+
         cameraCFrame = cameraCFrame * CFrame.Angles(rotX, 0, 0)
         cameraCFrame = CFrame.new(cameraCFrame.Position) * CFrame.Angles(0, rotY, 0) * CFrame.new(0, 0, 0) * (cameraCFrame - cameraCFrame.Position)
     end
-    
-    -- 處理高度控制
+
     if speedTouch == "up" then
         moveVector = moveVector + Vector3.new(0, verticalSpeed / moveSpeed, 0)
     elseif speedTouch == "down" then
         moveVector = moveVector + Vector3.new(0, -verticalSpeed / moveSpeed, 0)
     end
-    
-    -- 應用移動
+
     if moveVector.Magnitude > 0 then
-        local cameraMoveVector = (cameraCFrame.RightVector * moveVector.X + 
-                                  Vector3.new(0, moveVector.Y, 0) + 
+        local cameraMoveVector = (cameraCFrame.RightVector * moveVector.X +
+                                  Vector3.new(0, moveVector.Y, 0) +
                                   cameraCFrame.LookVector * moveVector.Z)
         cameraCFrame = cameraCFrame + (cameraMoveVector * moveSpeed)
     end
-    
+
     camera.CFrame = cameraCFrame
 end)
 
@@ -865,3 +1418,4 @@ print("左側搖桿: 前後左右移動")
 print("右側搖桿: 旋轉視角")
 print("頂部按鈕: 上升/下降")
 print("−/+ 按鈕: 縮小/展開所有控制按鈕")
+print("☰ 小藍按鈕: 開啟傳送點清單面板")
